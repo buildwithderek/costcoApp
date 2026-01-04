@@ -46,23 +46,40 @@ protocol ReceiptRepository {
     /// Update an existing receipt
     func update(_ receipt: Receipt) async throws
     
-    // MARK: - Delete
+    // MARK: - Delete (Soft Delete)
     
-    /// Delete a receipt by ID
+    /// Soft delete a receipt by ID (moves to trash, recoverable for 7 days)
     func delete(id: UUID) async throws
     
-    /// Delete a receipt
+    /// Soft delete a receipt
     func delete(_ receipt: Receipt) async throws
     
-    /// Delete multiple receipts
+    /// Soft delete multiple receipts
     func deleteAll(_ receipts: [Receipt]) async throws
     
-    /// Delete all receipts (use with caution!)
+    /// Soft delete all receipts (use with caution!)
     func deleteAll() async throws
+    
+    // MARK: - Soft Delete Recovery
+    
+    /// Restore a soft-deleted receipt
+    func restore(id: UUID) async throws
+    
+    /// Fetch all soft-deleted receipts (trash)
+    func fetchDeleted() async throws -> [Receipt]
+    
+    /// Permanently delete a receipt (cannot be recovered)
+    func permanentlyDelete(id: UUID) async throws
+    
+    /// Empty trash - permanently delete all soft-deleted receipts
+    func emptyTrash() async throws
+    
+    /// Count of soft-deleted receipts
+    func countDeleted() async throws -> Int
     
     // MARK: - Count
     
-    /// Get total count of receipts
+    /// Get total count of active (non-deleted) receipts
     func count() async throws -> Int
     
     /// Get count of receipts for a specific date
@@ -108,6 +125,14 @@ extension ReceiptRepository {
     func deleteAll() async throws {
         let receipts = try await fetchAll()
         try await deleteAll(receipts)
+    }
+    
+    /// Default implementation - empty trash deletes all soft-deleted receipts
+    func emptyTrash() async throws {
+        let deleted = try await fetchDeleted()
+        for receipt in deleted {
+            try await permanentlyDelete(id: receipt.id)
+        }
     }
 }
 

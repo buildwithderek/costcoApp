@@ -4,6 +4,7 @@
 //
 //  Use Case for exporting audits to CSV
 //  Generates a CSV file matching your spreadsheet format
+//  ENHANCED: Row validation and hardened CSV escaping
 //  Created: December 2025
 //
 
@@ -147,7 +148,7 @@ final class DefaultExportAuditsUseCase: ExportAuditsUseCase {
         // Generate filename
         let filename = generateFilename(date: date, format: format)
         
-        // Generate CSV content
+        // Generate CSV content with validation
         let csvContent = generateCSV(receipts: receipts, auditLookup: auditLookup)
         
         // Save to file
@@ -162,15 +163,29 @@ final class DefaultExportAuditsUseCase: ExportAuditsUseCase {
     
     private func generateCSV(receipts: [Receipt], auditLookup: [UUID: AuditData]) -> String {
         var lines: [String] = []
+        var validationErrors: [String] = []
         
         // Add header row
         lines.append(Self.csvHeaders.joined(separator: ","))
         
         // Add data rows - one row per receipt
-        for receipt in receipts {
+        for (index, receipt) in receipts.enumerated() {
             let audit = auditLookup[receipt.id]
             let row = generateCSVRow(receipt: receipt, audit: audit)
+            
+            // Validate row has correct column count
+            if !validateCSVRow(row, rowIndex: index + 1) {
+                validationErrors.append("Row \(index + 1) (Receipt \(receipt.id))")
+            }
+            
             lines.append(row)
+        }
+        
+        // Log validation results
+        if validationErrors.isEmpty {
+            Logger.shared.success("CSV validation passed: \(receipts.count) rows OK")
+        } else {
+            Logger.shared.error("CSV validation failed for \(validationErrors.count) rows: \(validationErrors.joined(separator: ", "))")
         }
         
         return lines.joined(separator: "\n") + "\n"
@@ -353,15 +368,91 @@ final class DefaultExportAuditsUseCase: ExportAuditsUseCase {
         return formatter.string(from: date)
     }
     
+    /// Hardened CSV escaping that handles all edge cases:
+    /// - Commas, quotes, newlines (standard CSV)
+    /// - Carriage returns
+    /// - Tab characters
+    /// - Unicode and emoji
+    /// - Leading/trailing whitespace
+    /// - Empty strings
     private func escapeCSV(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Handle nil-equivalent
+        guard !value.isEmpty else { return "" }
         
-        if trimmed.contains(",") || trimmed.contains("\"") || trimmed.contains("\n") {
-            let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
-            return "\"\(escaped)\""
+        // Trim whitespace but preserve internal spacing
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Check if escaping is needed
+        let needsEscaping = result.contains(",") ||
+                           result.contains("\"") ||
+                           result.contains("\n") ||
+                           result.contains("\r") ||
+                           result.contains("\t") ||
+                           result.hasPrefix(" ") ||
+                           result.hasSuffix(" ")
+        
+        if needsEscaping {
+            // Escape double quotes by doubling them (CSV standard)
+            result = result.replacingOccurrences(of: "\"", with: "\"\"")
+            
+            // Replace problematic whitespace
+            result = result.replacingOccurrences(of: "\r\n", with: " ") // Windows newlines
+            result = result.replacingOccurrences(of: "\r", with: " ")   // Old Mac newlines
+            result = result.replacingOccurrences(of: "\n", with: " ")   // Unix newlines
+            result = result.replacingOccurrences(of: "\t", with: " ")   // Tabs
+            
+            // Wrap in quotes
+            result = "\"\(result)\""
         }
         
-        return trimmed
+        return result
+    }
+    
+    /// Validate a CSV row has the correct number of columns
+    private func validateCSVRow(_ row: String, rowIndex: Int) -> Bool {
+        // Count columns (accounting for quoted fields with commas)
+        let columns = parseCSVColumns(row)
+        let expectedCount = Self.csvHeaders.count
+        
+        if columns.count != expectedCount {
+            Logger.shared.error("CSV row \(rowIndex) has \(columns.count) columns, expected \(expectedCount)")
+            Logger.shared.debug("Row content: \(row)")
+            return false
+        }
+        
+        return true
+    }
+    
+    /// Parse CSV row into columns (handles quoted fields correctly)
+    private func parseCSVColumns(_ row: String) -> [String] {
+        var columns: [String] = []
+        var currentColumn = ""
+        var inQuotes = false
+        var iterator = row.makeIterator()
+        
+        while let char = iterator.next() {
+            if char == "\"" {
+                if inQuotes {
+                    // Check for escaped quote ("")
+                    // We need to peek ahead, but Swift iterators don't support that easily
+                    // For validation purposes, we'll use a simpler approach
+                    inQuotes = false
+                } else {
+                    inQuotes = true
+                }
+                currentColumn.append(char)
+            } else if char == "," && !inQuotes {
+                columns.append(currentColumn)
+                currentColumn = ""
+            } else {
+                currentColumn.append(char)
+            }
+        }
+        
+        // Don't forget the last column
+        columns.append(currentColumn)
+        
+        return columns
     }
     
     private func generateFilename(date: Date, format: ExportFormat) -> String {

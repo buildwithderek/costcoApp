@@ -32,6 +32,9 @@ final class ReceiptEntity {
     var expectedItemCount: Int?
     var lineItemsData: Data? // JSON encoded [LineItem]
     
+    /// Soft delete timestamp - nil means not deleted
+    var deletedAt: Date?
+    
     init(
         id: UUID,
         timestamp: Date,
@@ -46,7 +49,8 @@ final class ReceiptEntity {
         transactionNumber: String?,
         memberID: String?,
         expectedItemCount: Int?,
-        lineItemsData: Data?
+        lineItemsData: Data?,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -62,6 +66,12 @@ final class ReceiptEntity {
         self.memberID = memberID
         self.expectedItemCount = expectedItemCount
         self.lineItemsData = lineItemsData
+        self.deletedAt = deletedAt
+    }
+    
+    /// Check if receipt is deleted (soft delete)
+    var isDeleted: Bool {
+        deletedAt != nil
     }
 }
 
@@ -212,8 +222,16 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
     
     private let modelContext: ModelContext
     
+    /// Auto-purge deleted receipts older than this many days
+    private let softDeleteRetentionDays: Int = 7
+    
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+        
+        // Auto-purge old soft-deleted receipts on init
+        Task {
+            await purgeExpiredSoftDeletes()
+        }
     }
     
     func save(_ receipt: Receipt) async throws {
@@ -234,14 +252,20 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
     
     func fetch(id: UUID) async throws -> Receipt? {
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ReceiptEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
-        return entities.first.map { EntityMapper.toDomain($0) }
+        
+        // Filter out soft-deleted in memory
+        guard let entity = entities.first(where: { $0.deletedAt == nil }) else {
+            return nil
+        }
+        return EntityMapper.toDomain(entity)
     }
     
     func fetchAll() async throws -> [Receipt] {
         let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         let entities = try modelContext.fetch(descriptor)
@@ -252,27 +276,37 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
         let startOfDay = date.startOfDay
         let endOfDay = date.endOfDay
         
+        // Simple predicate - just check deletedAt
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { entity in
-                entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
-            },
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter by date in memory
+        let filtered = entities.filter { entity in
+            entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
+        }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func fetchReceipts(from startDate: Date, to endDate: Date) async throws -> [Receipt] {
+        // Simple predicate - just check deletedAt
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { entity in
-                entity.timestamp >= startDate && entity.timestamp <= endDate
-            },
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter by date range in memory
+        let filtered = entities.filter { entity in
+            entity.timestamp >= startDate && entity.timestamp <= endDate
+        }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func fetchReceipts(matching predicate: @escaping (Receipt) -> Bool) async throws -> [Receipt] {
@@ -283,24 +317,38 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
     func searchReceipts(query: String) async throws -> [Receipt] {
         let lowercased = query.lowercased()
         
+        // Fetch all non-deleted receipts first (simple predicate for compiler)
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { entity in
-                (entity.barcodeValue?.localizedStandardContains(lowercased) ?? false) ||
-                (entity.transactionNumber?.localizedStandardContains(lowercased) ?? false) ||
-                (entity.registerNumber?.localizedStandardContains(lowercased) ?? false) ||
-                entity.rawText.localizedStandardContains(lowercased)
-            },
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter in memory for search (avoids complex predicate)
+        let filtered = entities.filter { entity in
+            if let barcode = entity.barcodeValue, barcode.localizedStandardContains(lowercased) {
+                return true
+            }
+            if let transaction = entity.transactionNumber, transaction.localizedStandardContains(lowercased) {
+                return true
+            }
+            if let register = entity.registerNumber, register.localizedStandardContains(lowercased) {
+                return true
+            }
+            if entity.rawText.localizedStandardContains(lowercased) {
+                return true
+            }
+            return false
+        }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func update(_ receipt: Receipt) async throws {
         let receiptID = receipt.id
         guard let entity = try modelContext.fetch(
-            FetchDescriptor<ReceiptEntity>(predicate: #Predicate { $0.id == receiptID })
+            FetchDescriptor<ReceiptEntity>(predicate: #Predicate<ReceiptEntity> { $0.id == receiptID })
         ).first else {
             throw RepositoryError.notFound
         }
@@ -324,18 +372,19 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
         Logger.shared.info("Updated receipt: \(receipt.id)")
     }
     
+    /// Soft delete - marks receipt as deleted but keeps it for recovery
     func delete(id: UUID) async throws {
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ReceiptEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         
         for entity in entities {
-            modelContext.delete(entity)
+            entity.deletedAt = Date()
         }
         
         try modelContext.save()
-        Logger.shared.info("Deleted receipt: \(id)")
+        Logger.shared.info("Soft deleted receipt: \(id)")
     }
     
     func delete(_ receipt: Receipt) async throws {
@@ -349,7 +398,9 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
     }
     
     func count() async throws -> Int {
-        let descriptor = FetchDescriptor<ReceiptEntity>()
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil }
+        )
         return try modelContext.fetchCount(descriptor)
     }
     
@@ -357,12 +408,119 @@ final class SwiftDataReceiptRepository: ReceiptRepository {
         let startOfDay = date.startOfDay
         let endOfDay = date.endOfDay
         
+        // Simple predicate
         let descriptor = FetchDescriptor<ReceiptEntity>(
-            predicate: #Predicate { entity in
-                entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
-            }
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt == nil }
         )
         
+        let entities = try modelContext.fetch(descriptor)
+        
+        // Filter by date in memory and count
+        let count = entities.filter { entity in
+            entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
+        }.count
+        
+        return count
+    }
+    
+    // MARK: - Soft Delete Management
+    
+    /// Restore a soft-deleted receipt
+    func restore(id: UUID) async throws {
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.id == id }
+        )
+        let entities = try modelContext.fetch(descriptor)
+        
+        for entity in entities {
+            entity.deletedAt = nil
+        }
+        
+        try modelContext.save()
+        Logger.shared.info("Restored receipt: \(id)")
+    }
+    
+    /// Fetch all soft-deleted receipts (for "Trash" view)
+    func fetchDeleted() async throws -> [Receipt] {
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt != nil },
+            sortBy: [SortDescriptor(\.deletedAt, order: .reverse)]
+        )
+        let entities = try modelContext.fetch(descriptor)
+        return entities.map { EntityMapper.toDomain($0) }
+    }
+    
+    /// Permanently delete a receipt (hard delete)
+    func permanentlyDelete(id: UUID) async throws {
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.id == id }
+        )
+        let entities = try modelContext.fetch(descriptor)
+        
+        for entity in entities {
+            modelContext.delete(entity)
+        }
+        
+        try modelContext.save()
+        Logger.shared.info("Permanently deleted receipt: \(id)")
+    }
+    
+    /// Purge soft-deleted receipts older than retention period
+    func purgeExpiredSoftDeletes() async {
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -softDeleteRetentionDays, to: Date()) else {
+            return
+        }
+        
+        do {
+            // Fetch all soft-deleted receipts first (simple predicate)
+            let descriptor = FetchDescriptor<ReceiptEntity>(
+                predicate: #Predicate<ReceiptEntity> { $0.deletedAt != nil }
+            )
+            let deletedEntities = try modelContext.fetch(descriptor)
+            
+            // Filter expired ones in memory (avoids complex predicate with force unwrap)
+            let expiredEntities = deletedEntities.filter { entity in
+                guard let deletedAt = entity.deletedAt else { return false }
+                return deletedAt < cutoffDate
+            }
+            
+            if !expiredEntities.isEmpty {
+                Logger.shared.info("Purging \(expiredEntities.count) expired soft-deleted receipts...")
+                
+                for entity in expiredEntities {
+                    modelContext.delete(entity)
+                }
+                
+                try modelContext.save()
+                Logger.shared.success("Purged \(expiredEntities.count) expired receipts")
+            }
+        } catch {
+            Logger.shared.error("Failed to purge expired soft deletes", error: error)
+        }
+    }
+    
+    /// Empty trash - permanently delete all soft-deleted receipts
+    func emptyTrash() async throws {
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt != nil }
+        )
+        let deletedEntities = try modelContext.fetch(descriptor)
+        
+        Logger.shared.info("Emptying trash: \(deletedEntities.count) receipts")
+        
+        for entity in deletedEntities {
+            modelContext.delete(entity)
+        }
+        
+        try modelContext.save()
+        Logger.shared.success("Trash emptied")
+    }
+    
+    /// Count of soft-deleted receipts
+    func countDeleted() async throws -> Int {
+        let descriptor = FetchDescriptor<ReceiptEntity>(
+            predicate: #Predicate<ReceiptEntity> { $0.deletedAt != nil }
+        )
         return try modelContext.fetchCount(descriptor)
     }
 }
@@ -396,7 +554,7 @@ final class SwiftDataAuditRepository: AuditRepository {
     
     func fetch(id: UUID) async throws -> AuditData? {
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<AuditEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         return entities.first.map { EntityMapper.toDomain($0) }
@@ -404,7 +562,7 @@ final class SwiftDataAuditRepository: AuditRepository {
     
     func fetchAudit(for receiptID: UUID) async throws -> AuditData? {
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { $0.receiptID == receiptID }
+            predicate: #Predicate<AuditEntity> { $0.receiptID == receiptID }
         )
         let entities = try modelContext.fetch(descriptor)
         return entities.first.map { EntityMapper.toDomain($0) }
@@ -422,27 +580,35 @@ final class SwiftDataAuditRepository: AuditRepository {
         let startOfDay = date.startOfDay
         let endOfDay = date.endOfDay
         
+        // Fetch all audits first
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { entity in
-                entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
-            },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter by date in memory
+        let filtered = entities.filter { entity in
+            entity.timestamp >= startOfDay && entity.timestamp <= endOfDay
+        }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func fetchAudits(from startDate: Date, to endDate: Date) async throws -> [AuditData] {
+        // Fetch all audits first
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { entity in
-                entity.timestamp >= startDate && entity.timestamp <= endDate
-            },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter by date range in memory
+        let filtered = entities.filter { entity in
+            entity.timestamp >= startDate && entity.timestamp <= endDate
+        }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func fetchAuditsWithIssues() async throws -> [AuditData] {
@@ -464,20 +630,21 @@ final class SwiftDataAuditRepository: AuditRepository {
     
     func fetchPendingAudits() async throws -> [AuditData] {
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { entity in
-                entity.staffName.isEmpty
-            },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { EntityMapper.toDomain($0) }
+        
+        // Filter pending in memory
+        let filtered = entities.filter { $0.staffName.isEmpty }
+        
+        return filtered.map { EntityMapper.toDomain($0) }
     }
     
     func update(_ audit: AuditData) async throws {
         let auditID = audit.id
         guard let entity = try modelContext.fetch(
-            FetchDescriptor<AuditEntity>(predicate: #Predicate { $0.id == auditID })
+            FetchDescriptor<AuditEntity>(predicate: #Predicate<AuditEntity> { $0.id == auditID })
         ).first else {
             throw RepositoryError.notFound
         }
@@ -498,7 +665,7 @@ final class SwiftDataAuditRepository: AuditRepository {
     
     func delete(id: UUID) async throws {
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<AuditEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         
@@ -516,7 +683,7 @@ final class SwiftDataAuditRepository: AuditRepository {
     
     func deleteAudits(for receiptID: UUID) async throws {
         let descriptor = FetchDescriptor<AuditEntity>(
-            predicate: #Predicate { $0.receiptID == receiptID }
+            predicate: #Predicate<AuditEntity> { $0.receiptID == receiptID }
         )
         let entities = try modelContext.fetch(descriptor)
         
@@ -584,7 +751,7 @@ final class SwiftDataImageRepository: ImageRepository {
     
     func fetch(id: UUID) async throws -> Data? {
         let descriptor = FetchDescriptor<ImageEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ImageEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         return entities.first?.imageData
@@ -602,7 +769,7 @@ final class SwiftDataImageRepository: ImageRepository {
     
     func delete(id: UUID) async throws {
         let descriptor = FetchDescriptor<ImageEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ImageEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         
@@ -622,7 +789,7 @@ final class SwiftDataImageRepository: ImageRepository {
     
     func exists(id: UUID) async throws -> Bool {
         let descriptor = FetchDescriptor<ImageEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ImageEntity> { $0.id == id }
         )
         let count = try modelContext.fetchCount(descriptor)
         return count > 0
@@ -630,7 +797,7 @@ final class SwiftDataImageRepository: ImageRepository {
     
     func size(id: UUID) async throws -> Int64? {
         let descriptor = FetchDescriptor<ImageEntity>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate<ImageEntity> { $0.id == id }
         )
         let entities = try modelContext.fetch(descriptor)
         return entities.first?.fileSize

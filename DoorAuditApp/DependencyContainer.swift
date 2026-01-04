@@ -52,9 +52,7 @@ final class DependencyContainer {
         AVCameraService()
     }()
     
-    lazy var exportService: ExportService = {
-        CSVExportService()
-    }()
+    // NOTE: exportService removed - use exportAuditsUseCase instead
     
     // MARK: - Use Cases
     
@@ -162,8 +160,7 @@ final class DependencyContainer {
     func makeReceiptListViewModel() -> ReceiptListViewModel {
         ReceiptListViewModel(
             fetchReceipts: fetchReceiptsUseCase,
-            deleteReceipt: deleteReceiptUseCase,
-            exportService: exportService
+            deleteReceipt: deleteReceiptUseCase
         )
     }
 }

@@ -5,6 +5,7 @@
 //  OCR Service using Apple's Vision framework
 //  ENHANCED: Handles columnar receipt format where items and prices are on separate lines
 //  FIXED: Scans entire receipt for prices (they appear after SUBTOTAL in OCR output)
+//  ADDED: Item count validation with mismatch warnings
 //  Created: December 2025
 //
 
@@ -44,7 +45,7 @@ final class VisionOCRService: OCRService {
     }
     
     func parseReceiptData(from text: String) -> ParsedReceiptData {
-        Logger.shared.info("🔍 parseReceiptData: Starting to parse receipt text...")
+        Logger.shared.info("📝 parseReceiptData: Starting to parse receipt text...")
         
         let lines = text
             .components(separatedBy: .newlines)
@@ -52,9 +53,9 @@ final class VisionOCRService: OCRService {
             .filter { !$0.isEmpty }
         
         // Log the raw OCR text for debugging
-        Logger.shared.debug("🔍 Total lines from OCR: \(lines.count)")
+        Logger.shared.debug("📝 Total lines from OCR: \(lines.count)")
         for (index, line) in lines.enumerated() {
-            Logger.shared.debug("🔍 Line[\(index)]: \(line)")
+            Logger.shared.debug("📝 Line[\(index)]: \(line)")
         }
         
         var storeName: String?
@@ -86,7 +87,7 @@ final class VisionOCRService: OCRService {
             // Item count - "Items Sold: 9" or "TOTAL NUMBER OF ITEMS SOLD = 9"
             if let count = extractItemCount(from: line) {
                 expectedItemCount = count
-                Logger.shared.info("🔍 Found expected item count: \(count)")
+                Logger.shared.info("📝 Found expected item count: \(count)")
             }
             
             // Transaction details from footer line: "Whse:424 Trm: 10 Trn:375 OP:114"
@@ -94,7 +95,7 @@ final class VisionOCRService: OCRService {
                 registerNumber = footer.terminal
                 transactionNumber = footer.transaction
                 cashierNumber = footer.cashier
-                Logger.shared.info("🔍 Found footer: Trm=\(footer.terminal), Trn=\(footer.transaction), OP=\(footer.cashier)")
+                Logger.shared.info("📝 Found footer: Trm=\(footer.terminal), Trn=\(footer.transaction), OP=\(footer.cashier)")
             }
             
             // Member ID: "2D Member 112038017578"
@@ -115,16 +116,33 @@ final class VisionOCRService: OCRService {
         }
         
         // MARK: Extract line items using columnar format detection
-        Logger.shared.info("🔍 Starting COLUMNAR item extraction...")
+        Logger.shared.info("📝 Starting COLUMNAR item extraction...")
         let lineItems = extractColumnarItems(from: lines)
-        Logger.shared.info("🔍 Extracted \(lineItems.count) items")
+        Logger.shared.info("📝 Extracted \(lineItems.count) items")
+        
+        // MARK: Validate item count
+        if let expected = expectedItemCount {
+            let extracted = lineItems.count
+            let difference = abs(expected - extracted)
+            
+            if extracted == expected {
+                Logger.shared.success("[OCR] Item count matches: \(extracted) items")
+            } else if difference <= 2 {
+                // Small difference - may be CA REDEMP items or OCR noise
+                Logger.shared.warning("[OCR] Item count mismatch: extracted \(extracted), expected \(expected) (difference: \(difference))")
+            } else {
+                // Large difference - significant issue
+                Logger.shared.error("[OCR] SIGNIFICANT item count mismatch: extracted \(extracted), expected \(expected) (difference: \(difference))")
+                Logger.shared.warning("[OCR] Consider rescanning receipt for better accuracy")
+            }
+        }
         
         // If no total found, use max amount from allAmounts
         if total == nil {
             total = allAmounts.max()
         }
         
-        Logger.shared.info("🔍 Parsed: store=\(storeName ?? "nil"), items=\(lineItems.count), total=\(total?.description ?? "nil")")
+        Logger.shared.info("📝 Parsed: store=\(storeName ?? "nil"), items=\(lineItems.count), total=\(total?.description ?? "nil")")
         
         return ParsedReceiptData(
             storeName: storeName,
@@ -167,7 +185,7 @@ final class VisionOCRService: OCRService {
             }
         }
         
-        Logger.shared.debug("🔍 Item names section: lines[\(itemStartIndex)..<\(itemEndIndex)]")
+        Logger.shared.debug("📝 Item names section: lines[\(itemStartIndex)..<\(itemEndIndex)]")
         
         // PASS 1: Extract item names from the items section
         for i in itemStartIndex..<itemEndIndex {
@@ -176,11 +194,11 @@ final class VisionOCRService: OCRService {
             
             // Skip known non-item patterns
             if line.count < 3 {
-                Logger.shared.debug("🔍 [\(i)] Skipped (too short): '\(line)'")
+                Logger.shared.debug("📝 [\(i)] Skipped (too short): '\(line)'")
                 continue
             }
             if skipKeywords.contains(where: { lineLower.contains($0) }) {
-                Logger.shared.debug("🔍 [\(i)] Skipped (keyword): '\(line)'")
+                Logger.shared.debug("📝 [\(i)] Skipped (keyword): '\(line)'")
                 continue
             }
             
@@ -188,13 +206,13 @@ final class VisionOCRService: OCRService {
             if let item = extractItemCandidate(from: line) {
                 // Skip CA REDEMP items
                 if item.name.lowercased().contains("redemp") || item.name.lowercased().contains("crv") {
-                    Logger.shared.debug("🔍 [\(i)] Skipped REDEMP: \(item.name)")
+                    Logger.shared.debug("📝 [\(i)] Skipped REDEMP: \(item.name)")
                     continue
                 }
                 itemCandidates.append((code: item.code, name: item.name, lineIndex: i))
-                Logger.shared.debug("🔍 [\(i)] Item candidate: \(item.code ?? "?") \(item.name)")
+                Logger.shared.debug("📝 [\(i)] Item candidate: \(item.code ?? "?") \(item.name)")
             } else {
-                Logger.shared.debug("🔍 [\(i)] No match: '\(line)'")
+                Logger.shared.debug("📝 [\(i)] No match: '\(line)'")
             }
         }
         
@@ -206,11 +224,11 @@ final class VisionOCRService: OCRService {
             // Check if this line is JUST a price (standalone price line)
             if let price = extractStandalonePrice(from: line) {
                 priceCandidates.append((price: price, lineIndex: i))
-                Logger.shared.debug("🔍 [\(i)] Price candidate: $\(price)")
+                Logger.shared.debug("📝 [\(i)] Price candidate: $\(price)")
             }
         }
         
-        Logger.shared.info("🔍 Found \(itemCandidates.count) item candidates and \(priceCandidates.count) price candidates")
+        Logger.shared.info("📝 Found \(itemCandidates.count) item candidates and \(priceCandidates.count) price candidates")
         
         // PASS 3: Correlate items with prices
         // Strategy: The first N prices correspond to the first N items (in order)
@@ -233,9 +251,9 @@ final class VisionOCRService: OCRService {
             results.append(lineItem)
             
             if let p = price {
-                Logger.shared.info("🔍 ✅ MATCHED: '\(item.name)' @ $\(p)")
+                Logger.shared.info("📝 ✅ MATCHED: '\(item.name)' @ $\(p)")
             } else {
-                Logger.shared.warning("🔍 ⚠️ Item without price: '\(item.name)'")
+                Logger.shared.warning("📝 ⚠️ Item without price: '\(item.name)'")
             }
         }
         

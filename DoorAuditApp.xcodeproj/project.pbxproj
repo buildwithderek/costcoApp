@@ -33,6 +33,7 @@
 		0CAD8FA92EFCF3E800FA3B8E /* Exceptions for "DoorAuditApp" folder in "DoorAuditApp" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Features/ReceiptCapture/ReceiptList/Presentation/ViewModels/Untitled.swift,
 				Info.plist,
 			);
 			target = 0CD8396C2EF91F3400691B6F /* DoorAuditApp */;

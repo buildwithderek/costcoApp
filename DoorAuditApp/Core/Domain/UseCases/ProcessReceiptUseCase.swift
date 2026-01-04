@@ -315,9 +315,4 @@ protocol CameraService {
     func getCameraConfiguration() -> CameraConfiguration
 }
 
-// MARK: - Export Service Protocol
-
-/// Protocol for export service
-protocol ExportService {
-    // Export functionality defined in CSVExportService
-}
+// NOTE: ExportService protocol removed - use ExportAuditsUseCase instead

@@ -2,39 +2,30 @@
 //  ReceiptCaptureViewModel.swift
 //  DoorAuditApp
 //
-//  ViewModel for receipt capture and processing
-//  Handles camera capture, image processing, and navigation to audit
+//  ViewModel for receipt capture and main screen
+//  Handles: Camera capture, OCR processing, today's receipts list
 //  Created: December 2025
 //
 
 import Foundation
 import SwiftUI
-import Observation
+import UIKit
 
-/// ViewModel for receipt capture screen
 @Observable
 final class ReceiptCaptureViewModel {
     
     // MARK: - State
     
+    var todaysReceipts: [Receipt] = []
+    var allReceiptsCount: Int = 0
+    var completedCount: Int = 0
+    
     var isProcessing = false
     var error: Error?
     
-    // Navigation
-    var shouldNavigateToAudit = false
+    // Navigation state
     var capturedReceipt: Receipt?
-    
-    // Today's receipts
-    var todaysReceipts: [Receipt] = []
-    var allReceiptsCount: Int = 0
-    
-    // MARK: - Computed Properties
-    
-    var completedCount: Int {
-        // This would need audit repository to check completed status
-        // For now, return count of receipts (placeholder)
-        todaysReceipts.count
-    }
+    var shouldNavigateToAudit = false
     
     // MARK: - Dependencies
     
@@ -55,8 +46,6 @@ final class ReceiptCaptureViewModel {
         self.fetchReceipts = fetchReceipts
         self.deleteReceipt = deleteReceipt
         self.cameraService = cameraService
-        
-        Logger.shared.info("ReceiptCaptureViewModel initialized")
     }
     
     // MARK: - Actions
@@ -64,62 +53,51 @@ final class ReceiptCaptureViewModel {
     /// Capture and process a receipt image
     @MainActor
     func captureReceipt(_ image: UIImage) async {
-        Logger.shared.info("📸 captureReceipt called with image size: \(image.size)")
-        
         isProcessing = true
         error = nil
         
         do {
-            Logger.shared.info("📸 Step 1: Calling processReceipt.execute()...")
+            Logger.shared.info("Processing captured receipt...")
             
-            // Process the receipt image (OCR, parse, save)
+            // Process the receipt image (OCR, parsing, saving)
             let receipt = try await processReceipt.execute(image: image)
             
-            Logger.shared.success("📸 Step 2: Receipt processed successfully!")
-            Logger.shared.info("📸 Receipt ID: \(receipt.id)")
-            Logger.shared.info("📸 Line items count: \(receipt.lineItems.count)")
-            Logger.shared.info("📸 Expected items: \(receipt.expectedItemCount ?? -1)")
-            Logger.shared.info("📸 Total amount: $\(receipt.totalAmount ?? 0)")
-            Logger.shared.info("📸 Register: \(receipt.registerNumber ?? "nil")")
-            Logger.shared.info("📸 Transaction: \(receipt.transactionNumber ?? "nil")")
-            
-            // Log each line item
-            for (index, item) in receipt.lineItems.enumerated() {
-                Logger.shared.debug("📸 LineItem[\(index)]: \(item.description) - $\(item.price ?? 0)")
-            }
-            
-            // Set captured receipt for navigation
-            Logger.shared.info("📸 Step 3: Setting capturedReceipt...")
-            self.capturedReceipt = receipt
-            
-            Logger.shared.info("📸 Step 4: Setting shouldNavigateToAudit = true...")
-            self.shouldNavigateToAudit = true
+            // Set up for navigation
+            capturedReceipt = receipt
+            shouldNavigateToAudit = true
             
             // Reload today's receipts
-            Logger.shared.info("📸 Step 5: Reloading today's receipts...")
             await loadTodaysReceipts()
             
-            isProcessing = false
-            Logger.shared.success("📸 captureReceipt completed successfully!")
+            Logger.shared.success("Receipt captured: \(receipt.id)")
             
         } catch {
-            Logger.shared.error("📸 captureReceipt FAILED", error: error)
+            Logger.shared.error("Failed to process receipt", error: error)
             self.error = error
-            isProcessing = false
         }
+        
+        isProcessing = false
     }
     
     /// Load today's receipts
     @MainActor
     func loadTodaysReceipts() async {
         do {
+            // Fetch today's receipts
             todaysReceipts = try await fetchReceipts.fetchTodaysReceipts()
+            
+            // Fetch total count
             allReceiptsCount = try await fetchReceipts.count()
             
-            Logger.shared.info("Loaded \(todaysReceipts.count) receipts for today, total: \(allReceiptsCount)")
+            // Count completed audits (simplified - count where audit exists)
+            // Note: In production, you'd query the audit repository
+            completedCount = 0
+            
+            Logger.shared.info("Loaded \(todaysReceipts.count) receipts for today")
             
         } catch {
-            Logger.shared.error("Failed to load today's receipts", error: error)
+            Logger.shared.error("Failed to load receipts", error: error)
+            self.error = error
         }
     }
     
@@ -129,7 +107,7 @@ final class ReceiptCaptureViewModel {
         do {
             try await deleteReceipt.execute(receipt: receipt)
             
-            // Remove from local array
+            // Remove from local list
             todaysReceipts.removeAll { $0.id == receipt.id }
             allReceiptsCount = max(0, allReceiptsCount - 1)
             
@@ -140,22 +118,27 @@ final class ReceiptCaptureViewModel {
             self.error = error
         }
     }
-    func removeReceiptLocally(id: UUID) {
-        todaysReceipts.removeAll { $0.id == id }
-        // Also update allReceiptsCount if you track it
-        if allReceiptsCount > 0 {
-            allReceiptsCount -= 1
-        }
-        Logger.shared.debug("ReceiptCaptureVM: Removed receipt locally: \(id)")
-    }
-    /// Called after navigation to audit
+    
+    /// Called after navigation to audit view
     func didNavigateToAudit() {
-        Logger.shared.info("📸 didNavigateToAudit called - receipt has \(capturedReceipt?.lineItems.count ?? 0) items")
         shouldNavigateToAudit = false
+        capturedReceipt = nil
     }
     
     /// Clear error
     func clearError() {
         error = nil
+    }
+    
+    // MARK: - Camera Helpers
+    
+    /// Check if camera is available
+    func isCameraAvailable() -> Bool {
+        cameraService.isCameraAvailable()
+    }
+    
+    /// Request camera permission
+    func requestCameraPermission() async -> Bool {
+        await cameraService.requestCameraPermission()
     }
 }

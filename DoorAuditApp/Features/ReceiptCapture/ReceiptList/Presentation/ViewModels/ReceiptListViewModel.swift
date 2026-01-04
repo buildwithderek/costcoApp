@@ -47,18 +47,17 @@ final class ReceiptListViewModel {
     
     private let fetchReceipts: FetchReceiptsUseCase
     private let deleteReceipt: DeleteReceiptUseCase
-    private let exportService: ExportService
+
     
     // MARK: - Initialization
     
     init(
         fetchReceipts: FetchReceiptsUseCase,
-        deleteReceipt: DeleteReceiptUseCase,
-        exportService: ExportService
+        deleteReceipt: DeleteReceiptUseCase
     ) {
         self.fetchReceipts = fetchReceipts
         self.deleteReceipt = deleteReceipt
-        self.exportService = exportService
+
     }
     
     // MARK: - Computed Properties
@@ -221,12 +220,10 @@ extension ReceiptListViewModel {
     static var preview: ReceiptListViewModel {
         let mockFetch = MockFetchReceiptsUseCaseForList()
         let mockDelete = MockDeleteReceiptUseCase()
-        let mockExport = MockExportService()
         
         let vm = ReceiptListViewModel(
             fetchReceipts: mockFetch,
             deleteReceipt: mockDelete,
-            exportService: mockExport
         )
         
         // Populate with sample data
@@ -295,7 +292,4 @@ private class MockDeleteReceiptUseCase: DeleteReceiptUseCase {
     }
 }
 
-private class MockExportService: ExportService {
-    // Mock implementation
-}
 #endif
