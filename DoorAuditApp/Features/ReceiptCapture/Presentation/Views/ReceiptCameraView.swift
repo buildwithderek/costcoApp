@@ -52,11 +52,11 @@ struct ReceiptCameraView: View {
         .ignoresSafeArea()
         .sheet(isPresented: $showReview) {
             if let image = capturedImage {
-                ReviewImageView(
+                ScanReviewView(
                     image: image,
-                    onAccept: {
+                    onAccept: { correctedImage in
                         showReview = false
-                        onPhotoCaptured(image)
+                        onPhotoCaptured(correctedImage)
                     },
                     onRetake: {
                         showReview = false
@@ -316,64 +316,6 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
 
         DispatchQueue.main.async { [weak self] in
             self?.onCapture?(image)
-        }
-    }
-}
-
-// MARK: - Review Image View
-
-struct ReviewImageView: View {
-    let image: UIImage
-    let onAccept: () -> Void
-    let onRetake: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Image preview
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
-
-                // Action buttons
-                HStack(spacing: 20) {
-                    Button {
-                        onRetake()
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Retake")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray)
-                        .cornerRadius(12)
-                    }
-
-                    Button {
-                        onAccept()
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark")
-                            Text("Use Photo")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(CostcoTheme.Colors.success)
-                        .cornerRadius(12)
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground))
-            }
-            .navigationTitle("Review Photo")
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
