@@ -9,8 +9,6 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @Environment(\.dependencies) private var dependencies
-    
     var body: some View {
         TabView {
             // Home - Receipt Capture
@@ -44,9 +42,6 @@ struct MainTabView: View {
 // MARK: - Receipts List View
 
 struct ReceiptsListView: View {
-    @Environment(\.dependencies) private var dependencies
-    @Environment(\.modelContext) private var modelContext
-    
     @State private var viewModel: ReceiptListViewModel
     
     init() {
@@ -54,48 +49,57 @@ struct ReceiptsListView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Filter and Search in a fixed header
-            VStack(spacing: CostcoTheme.Spacing.md) {
-                filterPicker
-                searchBar
-            }
-            .padding()
-            .background(CostcoTheme.Colors.background)
-            
-            // Receipts List with swipe actions
+        Group {
             if viewModel.displayReceipts.isEmpty {
                 emptyState
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(CostcoTheme.Colors.background)
             } else {
                 List {
-                    ForEach(viewModel.displayReceipts) { receipt in
-                        NavigationLink {
-                            AuditFormView(receipt: receipt)
-                        } label: {
-                            ReceiptListRow(receipt: receipt)
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                Task {
-                                    await viewModel.delete(receipt)
-                                }
+                    Section {
+                        summaryCard
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
+                    Section(viewModel.resultCount == 1 ? "1 receipt" : "\(viewModel.resultCount) receipts") {
+                        ForEach(viewModel.displayReceipts) { receipt in
+                            NavigationLink {
+                                AuditFormView(receipt: receipt)
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                ReceiptListRow(receipt: receipt)
+                            }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await viewModel.delete(receipt)
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(CostcoTheme.Colors.background)
             }
         }
         .background(CostcoTheme.Colors.background)
-        .navigationTitle("All Receipts")
+        .navigationTitle("Receipts")
+        .searchable(text: $viewModel.searchQuery, prompt: "Search receipts")
+        .safeAreaInset(edge: .top) {
+            filterPicker
+                .padding(.horizontal, CostcoTheme.Spacing.md)
+                .padding(.top, CostcoTheme.Spacing.sm)
+                .padding(.bottom, CostcoTheme.Spacing.xs)
+                .background(CostcoTheme.Colors.background)
+        }
         .task {
             await viewModel.loadReceipts()
         }
@@ -125,42 +129,39 @@ struct ReceiptsListView: View {
         .pickerStyle(.segmented)
     }
     
-    private var searchBar: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
+            Text("Review queue")
+                .font(CostcoTheme.Typography.headline)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+            Text(viewModel.resultsSummary)
+                .font(CostcoTheme.Typography.subheadline)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
-            
-            TextField("Search receipts...", text: $viewModel.searchQuery)
-            
-            if !viewModel.searchQuery.isEmpty {
-                Button {
+
+            if viewModel.isSearching {
+                Button("Clear Search") {
                     viewModel.searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(CostcoTheme.Colors.textSecondary)
+                }
+                .font(CostcoTheme.Typography.subheadline.weight(.semibold))
+                .foregroundColor(CostcoTheme.Colors.primary)
+            }
+        }
+        .costcoCard()
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label(viewModel.emptyStateTitle, systemImage: viewModel.isSearching ? "magnifyingglass" : "doc.text")
+        } description: {
+            Text(viewModel.emptyStateMessage)
+        } actions: {
+            if viewModel.isSearching {
+                Button("Clear Search") {
+                    viewModel.searchQuery = ""
                 }
             }
         }
-        .padding(CostcoTheme.Spacing.md)
-        .background(CostcoTheme.Colors.cardBackground)
-        .cornerRadius(CostcoTheme.CornerRadius.sm)
-    }
-    
-    private var emptyState: some View {
-        VStack(spacing: CostcoTheme.Spacing.md) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 48))
-                .foregroundColor(CostcoTheme.Colors.textSecondary)
-            
-            Text("No receipts found")
-                .font(CostcoTheme.Typography.title3)
-                .foregroundColor(CostcoTheme.Colors.textPrimary)
-            
-            Text(viewModel.searchQuery.isEmpty ? "No receipts for this period" : "Try a different search")
-                .font(CostcoTheme.Typography.subheadline)
-                .foregroundColor(CostcoTheme.Colors.textSecondary)
-        }
-        .padding(CostcoTheme.Spacing.xl)
     }
 }
 
