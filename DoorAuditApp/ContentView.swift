@@ -322,20 +322,6 @@ struct ContentView: View {
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                // #region agent log
-                                let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-                                let logEntry = "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"ContentView.swift:303\",\"message\":\"Swipe delete button tapped\",\"data\":{\"receiptID\":\"\(receipt.id.uuidString)\",\"receiptNumber\":\(index + 1)},\"timestamp\":\(timestamp)}\n"
-                                let logPath = "/Users/derekpunaro/Desktop/DoorAuditApp/.cursor/debug.log"
-                                if let logData = logEntry.data(using: .utf8) {
-                                    if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                                        fileHandle.seekToEndOfFile()
-                                        fileHandle.write(logData)
-                                        fileHandle.closeFile()
-                                    } else {
-                                        try? logData.write(to: URL(fileURLWithPath: logPath), options: [])
-                                    }
-                                }
-                                // #endregion
                                 Task {
                                     await viewModel.deleteReceipt(receipt)
                                 }

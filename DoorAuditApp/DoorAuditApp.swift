@@ -1,25 +1,17 @@
-
 //
-//  L1.swift
-//  L1 Demo
-//
-//  Created by Derek Punaro on 12/23/25.
-//
-
-
-//
-//  L1_DemoApp.swift
-//  L1 Demo
+//  DoorAuditApp.swift
+//  DoorAuditApp
 //
 //  Main app entry point with Clean Architecture
-//  Updated: December 2025
+//  Created by Derek Punaro on 12/23/25.
 //
 
 import SwiftUI
 import SwiftData
 
+
 @main
-struct L1_DemoApp: App {
+struct DoorAuditApp: App {
     
     // MARK: - Properties
     
@@ -31,7 +23,7 @@ struct L1_DemoApp: App {
     // MARK: - Initialization
     
     init() {
-        Logger.shared.info("🚀 L1 Demo App Starting...")
+        Logger.shared.info("🚀 DoorAuditApp Starting...")
         Logger.shared.info("App Version: \(AppConstants.fullVersion)")
         Logger.shared.info("Store: \(AppConstants.Store.fullName)")
         
@@ -58,7 +50,7 @@ struct L1_DemoApp: App {
 }
 
 // MARK: - Environment Key for Dependencies
-
+@MainActor
 private struct DependencyContainerKey: EnvironmentKey {
     static var defaultValue: DependencyContainer {
         DependencyContainer.shared
@@ -66,6 +58,7 @@ private struct DependencyContainerKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    @MainActor
     var dependencies: DependencyContainer {
         get { self[DependencyContainerKey.self] }
         set { self[DependencyContainerKey.self] = newValue }
