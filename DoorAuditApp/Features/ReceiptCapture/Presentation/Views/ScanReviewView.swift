@@ -20,6 +20,9 @@ struct ScanReviewView: View {
 
     @State private var editableDocument: DetectedDocument
     @State private var selectedEnhancementMode: ScanEnhancementMode
+    private let initialDocument: DetectedDocument
+
+    @State private var editableDocument: DetectedDocument
     @State private var previewImage: UIImage
 
     init(
@@ -34,6 +37,8 @@ struct ScanReviewView: View {
         let selectedEnhancementMode: ScanEnhancementMode = .receipt
         let correctedPreview = scannerService.correctPerspective(in: fixedImage, using: detectedDocument) ?? fixedImage
         let enhancedPreview = enhancementService.enhance(correctedPreview, mode: selectedEnhancementMode) ?? correctedPreview
+        let detectedDocument = scannerService.detectDocument(in: fixedImage) ?? .defaultDocument()
+        let correctedPreview = scannerService.correctPerspective(in: fixedImage, using: detectedDocument) ?? fixedImage
 
         self.image = fixedImage
         self.onAccept = onAccept
@@ -44,6 +49,9 @@ struct ScanReviewView: View {
         _editableDocument = State(initialValue: detectedDocument)
         _selectedEnhancementMode = State(initialValue: selectedEnhancementMode)
         _previewImage = State(initialValue: enhancedPreview)
+        self.initialDocument = detectedDocument
+        _editableDocument = State(initialValue: detectedDocument)
+        _previewImage = State(initialValue: correctedPreview)
     }
 
     var body: some View {
@@ -73,6 +81,7 @@ struct ScanReviewView: View {
                 .foregroundColor(CostcoTheme.Colors.textPrimary)
 
             Text("The corrected scan updates as you drag each handle, and you can switch enhancement presets to make thermal receipt text easier to read before OCR runs.")
+            Text("The corrected scan updates as you drag each handle, so you can rescue skewed or off-angle captures before OCR runs.")
                 .font(CostcoTheme.Typography.subheadline)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
 
@@ -198,6 +207,12 @@ struct ScanReviewView: View {
                     .clipShape(Capsule())
             }
 
+    private var previewCard: some View {
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
+            Text("Corrected preview")
+                .font(CostcoTheme.Typography.title3)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
             Image(uiImage: previewImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -209,6 +224,7 @@ struct ScanReviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: CostcoTheme.CornerRadius.md))
 
             Text("This flattened and enhanced image is what gets passed into the OCR and receipt-processing pipeline.")
+            Text("This flattened image is what gets passed into the OCR and receipt-processing pipeline.")
                 .font(CostcoTheme.Typography.footnote)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
         }
@@ -286,6 +302,7 @@ struct ScanReviewView: View {
     private func refreshPreview() {
         let correctedImage = scannerService.correctPerspective(in: image, using: editableDocument) ?? image
         previewImage = enhancementService.enhance(correctedImage, mode: selectedEnhancementMode) ?? correctedImage
+        previewImage = scannerService.correctPerspective(in: image, using: editableDocument) ?? image
     }
 
     private func displayPoint(for normalizedPoint: CGPoint, in imageRect: CGRect) -> CGPoint {

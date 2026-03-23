@@ -51,6 +51,37 @@ final class VisionDocumentScannerService: DocumentDetectionService, PerspectiveC
             return detectedDocument(from: request, logSuccess: false)
         } catch {
             Logger.shared.debug("Live document detection failed: \(error.localizedDescription)")
+        let request = VNDetectRectanglesRequest()
+        request.minimumAspectRatio = 0.2
+        request.maximumAspectRatio = 0.85
+        request.minimumSize = AppConstants.ImageProcessing.minDocumentSize
+        request.minimumConfidence = AppConstants.ImageProcessing.minDocumentConfidence
+        request.maximumObservations = 1
+        request.quadratureTolerance = 20
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+        do {
+            try handler.perform([request])
+
+            guard let rectangle = request.results?.first else {
+                Logger.shared.debug("No receipt quadrilateral detected")
+                return nil
+            }
+
+            let detectedDocument = DetectedDocument(
+                topLeft: rectangle.topLeft,
+                topRight: rectangle.topRight,
+                bottomLeft: rectangle.bottomLeft,
+                bottomRight: rectangle.bottomRight,
+                confidence: rectangle.confidence
+            )
+
+            Logger.shared.info("Receipt quadrilateral detected with confidence \(String(format: "%.2f", rectangle.confidence))")
+            return detectedDocument
+
+        } catch {
+            Logger.shared.warning("Document detection failed: \(error.localizedDescription)")
             return nil
         }
     }
