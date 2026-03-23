@@ -48,6 +48,18 @@ final class DependencyContainer {
         VisionBarcodeService()
     }()
     
+    lazy var documentScannerService: VisionDocumentScannerService = {
+        VisionDocumentScannerService()
+    }()
+
+    lazy var documentDetectionService: DocumentDetectionService = {
+        documentScannerService
+    }()
+
+    lazy var perspectiveCorrectionService: PerspectiveCorrectionService = {
+        documentScannerService
+    }()
+
     lazy var cameraService: CameraService = {
         AVCameraService()
     }()
@@ -60,6 +72,8 @@ final class DependencyContainer {
         DefaultProcessReceiptUseCase(
             ocrService: ocrService,
             barcodeService: barcodeService,
+            documentDetectionService: documentDetectionService,
+            perspectiveCorrectionService: perspectiveCorrectionService,
             receiptRepository: receiptRepository,
             imageRepository: imageRepository
         )
