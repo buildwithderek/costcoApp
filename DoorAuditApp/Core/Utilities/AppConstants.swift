@@ -34,6 +34,12 @@ enum AppConstants {
         
         /// Preview size for detail views
         static let previewSize = CGSize(width: 400, height: 400)
+
+        /// Minimum normalized size for a detected receipt/document
+        static let minDocumentSize: Float = 0.15
+
+        /// Minimum confidence for receipt/document detection
+        static let minDocumentConfidence: Float = 0.6
     }
     
     // MARK: - Animation & Timing
