@@ -37,3 +37,76 @@ struct DetectedDocument: Sendable {
         )
     }
 }
+
+enum DocumentCorner: CaseIterable, Identifiable {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
+
+    var id: Self { self }
+}
+
+extension DetectedDocument {
+    static func defaultDocument(inset: CGFloat = 0.08) -> DetectedDocument {
+        let clampedInset = min(max(inset, 0.0), 0.45)
+
+        return DetectedDocument(
+            topLeft: CGPoint(x: clampedInset, y: 1.0 - clampedInset),
+            topRight: CGPoint(x: 1.0 - clampedInset, y: 1.0 - clampedInset),
+            bottomLeft: CGPoint(x: clampedInset, y: clampedInset),
+            bottomRight: CGPoint(x: 1.0 - clampedInset, y: clampedInset),
+            confidence: 0
+        )
+    }
+
+    func point(for corner: DocumentCorner) -> CGPoint {
+        switch corner {
+        case .topLeft:
+            topLeft
+        case .topRight:
+            topRight
+        case .bottomLeft:
+            bottomLeft
+        case .bottomRight:
+            bottomRight
+        }
+    }
+
+    func updating(_ corner: DocumentCorner, to point: CGPoint) -> DetectedDocument {
+        switch corner {
+        case .topLeft:
+            DetectedDocument(
+                topLeft: point,
+                topRight: topRight,
+                bottomLeft: bottomLeft,
+                bottomRight: bottomRight,
+                confidence: confidence
+            )
+        case .topRight:
+            DetectedDocument(
+                topLeft: topLeft,
+                topRight: point,
+                bottomLeft: bottomLeft,
+                bottomRight: bottomRight,
+                confidence: confidence
+            )
+        case .bottomLeft:
+            DetectedDocument(
+                topLeft: topLeft,
+                topRight: topRight,
+                bottomLeft: point,
+                bottomRight: bottomRight,
+                confidence: confidence
+            )
+        case .bottomRight:
+            DetectedDocument(
+                topLeft: topLeft,
+                topRight: topRight,
+                bottomLeft: bottomLeft,
+                bottomRight: point,
+                confidence: confidence
+            )
+        }
+    }
+}
