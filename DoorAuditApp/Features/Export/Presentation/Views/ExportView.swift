@@ -14,39 +14,38 @@ import SwiftUI
 struct ExportView: View {
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
-    
+
     // MARK: - State
-    
+
     @State private var isExporting = false
     @State private var exportResult: ExportResult?
     @State private var exportError: Error?
-    
+
     @State private var showPreview = false
     @State private var showShareSheet = false
-    
+
     @State private var todaysReceiptCount = 0
     @State private var completedAuditCount = 0
-    
+
     // MARK: - Body
-    
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                // Header illustration
-                exportIllustration
-                
-                // Stats
-                statsSection
-                
-                // Export Button
-                exportButton
-                
-                Spacer()
-                
-                // Info text
-                infoText
+            ScrollView {
+                VStack(spacing: 24) {
+                    exportIllustration
+                    summaryCard
+
+                    if todaysReceiptCount == 0 {
+                        emptyState
+                    } else {
+                        exportButton
+                        infoCard
+                    }
+                }
+                .padding()
             }
-            .padding()
+            .background(CostcoTheme.Colors.background)
             .navigationTitle("Export Audits")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -90,54 +89,54 @@ struct ExportView: View {
             }
         }
     }
-    
+
     // MARK: - Subviews
-    
+
     private var exportIllustration: some View {
         ZStack {
             Circle()
                 .fill(CostcoTheme.Colors.primary.opacity(0.1))
                 .frame(width: 120, height: 120)
-            
+
             Image(systemName: "square.and.arrow.up.on.square.fill")
                 .font(.system(size: 48))
                 .foregroundColor(CostcoTheme.Colors.primary)
         }
         .padding(.top, 20)
     }
-    
-    private var statsSection: some View {
-        VStack(spacing: 12) {
-            Text("Today's Audits")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
+
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Today’s export")
+                .font(CostcoTheme.Typography.headline)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+            Text(todaysReceiptCount == 0
+                 ? "There are no receipts ready to export yet."
+                 : "Review today’s totals, then generate a CSV preview before sharing.")
+                .font(CostcoTheme.Typography.subheadline)
+                .foregroundColor(CostcoTheme.Colors.textSecondary)
+
             HStack(spacing: 40) {
-                VStack {
-                    Text("\(todaysReceiptCount)")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(CostcoTheme.Colors.primary)
-                    Text("Receipts")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                VStack {
-                    Text("\(completedAuditCount)")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(CostcoTheme.Colors.success)
-                    Text("Audited")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                statValue(title: "Receipts", value: "\(todaysReceiptCount)", color: CostcoTheme.Colors.primary)
+                statValue(title: "Audited", value: "\(completedAuditCount)", color: CostcoTheme.Colors.success)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .costcoCard()
     }
-    
+
+    private func statValue(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(color)
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
     private var exportButton: some View {
         Button {
             Task {
@@ -152,49 +151,52 @@ struct ExportView: View {
                     Image(systemName: "arrow.down.doc.fill")
                         .font(.title2)
                 }
-                
+
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isExporting ? "Generating..." : "Export to CSV")
+                    Text(isExporting ? "Generating preview..." : "Export today’s CSV")
                         .font(.headline)
-                    Text("Preview & share via email")
+                    Text("Open the preview, then share the file.")
                         .font(.caption)
-                        .opacity(0.8)
+                        .opacity(0.85)
                 }
+
+                Spacer()
             }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(
-                todaysReceiptCount == 0
-                    ? Color.gray
-                    : CostcoTheme.Colors.primary
-            )
-            .cornerRadius(16)
+            .costcoPrimaryButton()
         }
         .disabled(isExporting || todaysReceiptCount == 0)
     }
-    
-    private var infoText: some View {
-        VStack(spacing: 8) {
-            Text("The CSV file will match your spreadsheet format")
-                .font(.footnote)
-                .foregroundColor(.secondary)
-            
-            Text("You can email it, save to Files, or open in Numbers")
-                .font(.footnote)
-                .foregroundColor(.secondary)
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What happens next")
+                .font(CostcoTheme.Typography.headline)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+            Label("Preview the CSV before sending it.", systemImage: "doc.text.magnifyingglass")
+            Label("Share with Mail, Files, or Numbers.", systemImage: "square.and.arrow.up")
         }
-        .multilineTextAlignment(.center)
+        .font(CostcoTheme.Typography.subheadline)
+        .foregroundColor(CostcoTheme.Colors.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .costcoCard()
     }
-    
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("Nothing to export yet", systemImage: "tray")
+        } description: {
+            Text("Scan and audit a receipt first, then come back here to export the day’s CSV.")
+        }
+    }
+
     // MARK: - Methods
-    
+
     private func loadStats() async {
         do {
             let receipts = try await dependencies.fetchReceiptsUseCase.fetchTodaysReceipts()
             todaysReceiptCount = receipts.count
-            
-            // Count completed audits
+
             var completed = 0
             for receipt in receipts {
                 if let audit = try? await dependencies.auditRepository.fetchAudit(for: receipt.id),
@@ -203,25 +205,25 @@ struct ExportView: View {
                 }
             }
             completedAuditCount = completed
-            
+
         } catch {
             Logger.shared.error("Failed to load stats", error: error)
         }
     }
-    
+
     private func exportTodaysAudits() async {
         isExporting = true
         exportError = nil
-        
+
         do {
             let result = try await dependencies.exportAuditsUseCase.exportTodaysAudits()
-            
+
             await MainActor.run {
                 exportResult = result
                 isExporting = false
                 showPreview = true
             }
-            
+
         } catch {
             await MainActor.run {
                 exportError = error
@@ -235,13 +237,13 @@ struct ExportView: View {
 
 struct QuickExportButton: View {
     @Environment(\.dependencies) private var dependencies
-    
+
     @State private var isExporting = false
     @State private var exportResult: ExportResult?
     @State private var exportError: Error?
     @State private var showPreview = false
     @State private var showShareSheet = false
-    
+
     var body: some View {
         Button {
             Task {
@@ -295,20 +297,20 @@ struct QuickExportButton: View {
             }
         }
     }
-    
+
     private func exportTodaysAudits() async {
         isExporting = true
         exportError = nil
-        
+
         do {
             let result = try await dependencies.exportAuditsUseCase.exportTodaysAudits()
-            
+
             await MainActor.run {
                 exportResult = result
                 isExporting = false
                 showPreview = true
             }
-            
+
         } catch {
             await MainActor.run {
                 exportError = error
