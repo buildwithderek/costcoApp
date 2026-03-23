@@ -40,6 +40,24 @@ enum AppConstants {
 
         /// Minimum confidence for receipt/document detection
         static let minDocumentConfidence: Float = 0.6
+
+        /// Minimum normalized area needed before live auto-capture is considered
+        static let minLiveDocumentArea: CGFloat = 0.2
+
+        /// Number of stable live-detection frames required before auto-capture
+        static let stableFrameThreshold = 6
+
+        /// Interval between live Vision analyses during camera preview
+        static let liveDetectionInterval: TimeInterval = 0.12
+
+        /// Minimum acceptable average brightness during live capture / review
+        static let minLiveBrightness: Double = 0.28
+
+        /// Maximum acceptable average brightness before the image looks washed out
+        static let maxLiveBrightness: Double = 0.95
+
+        /// Minimum edge-strength score used as a lightweight blur heuristic
+        static let minSharpnessScore: Double = 0.02
     }
     
     // MARK: - Animation & Timing
