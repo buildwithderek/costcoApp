@@ -63,7 +63,46 @@ final class ReceiptListViewModel {
     // MARK: - Computed Properties
     
     var displayReceipts: [Receipt] {
-        searchQuery.isEmpty ? receipts : filteredReceipts
+        isSearching ? filteredReceipts : receipts
+    }
+
+    var isSearching: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var resultCount: Int {
+        displayReceipts.count
+    }
+
+    var resultsSummary: String {
+        let receiptLabel = resultCount == 1 ? "receipt" : "receipts"
+
+        if isSearching {
+            return "\(resultCount) \(receiptLabel) match \"\(searchQuery)\""
+        }
+
+        return "\(resultCount) \(receiptLabel) in \(selectedFilter.displayName.lowercased())"
+    }
+
+    var emptyStateTitle: String {
+        isSearching ? "No matching receipts" : "No receipts yet"
+    }
+
+    var emptyStateMessage: String {
+        if isSearching {
+            return "Try a different receipt number, register, or barcode."
+        }
+
+        switch selectedFilter {
+        case .all:
+            return "Captured receipts will appear here for quick review."
+        case .today:
+            return "Scan a receipt to start today’s audit queue."
+        case .thisWeek:
+            return "No receipts were captured this week."
+        case .thisMonth:
+            return "No receipts were captured this month."
+        }
     }
     
     var hasSelectedReceipts: Bool {
@@ -94,6 +133,7 @@ final class ReceiptListViewModel {
                 receipts = try await fetchReceipts.fetchThisMonthsReceipts()
             }
             
+            filterReceipts()
             Logger.shared.info("Loaded \(receipts.count) receipts (filter: \(selectedFilter.displayName))")
             
         } catch {
@@ -106,12 +146,14 @@ final class ReceiptListViewModel {
     
     /// Search receipts
     private func filterReceipts() {
-        guard !searchQuery.isEmpty else {
+        guard isSearching else {
             filteredReceipts = []
             return
         }
         
-        let query = searchQuery.lowercased()
+        let query = searchQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         filteredReceipts = receipts.filter { receipt in
             // Search in barcode
             if let barcode = receipt.barcodeValue, barcode.lowercased().contains(query) {
