@@ -36,6 +36,14 @@ struct DetectedDocument: Sendable {
             height: maxY - minY
         )
     }
+
+    var area: CGFloat {
+        boundingBox.width * boundingBox.height
+    }
+
+    var center: CGPoint {
+        CGPoint(x: boundingBox.midX, y: boundingBox.midY)
+    }
 }
 
 enum DocumentCorner: CaseIterable, Identifiable {

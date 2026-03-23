@@ -15,6 +15,11 @@ struct ScanReviewView: View {
 
     private let image: UIImage
     private let scannerService: VisionDocumentScannerService
+    private let enhancementService: CoreImageEnhancementService
+    private let initialDocument: DetectedDocument
+
+    @State private var editableDocument: DetectedDocument
+    @State private var selectedEnhancementMode: ScanEnhancementMode
     private let initialDocument: DetectedDocument
 
     @State private var editableDocument: DetectedDocument
@@ -27,6 +32,11 @@ struct ScanReviewView: View {
     ) {
         let fixedImage = image.fixedOrientation()
         let scannerService = VisionDocumentScannerService()
+        let enhancementService = CoreImageEnhancementService()
+        let detectedDocument = scannerService.detectDocument(in: fixedImage) ?? .defaultDocument()
+        let selectedEnhancementMode: ScanEnhancementMode = .receipt
+        let correctedPreview = scannerService.correctPerspective(in: fixedImage, using: detectedDocument) ?? fixedImage
+        let enhancedPreview = enhancementService.enhance(correctedPreview, mode: selectedEnhancementMode) ?? correctedPreview
         let detectedDocument = scannerService.detectDocument(in: fixedImage) ?? .defaultDocument()
         let correctedPreview = scannerService.correctPerspective(in: fixedImage, using: detectedDocument) ?? fixedImage
 
@@ -34,6 +44,11 @@ struct ScanReviewView: View {
         self.onAccept = onAccept
         self.onRetake = onRetake
         self.scannerService = scannerService
+        self.enhancementService = enhancementService
+        self.initialDocument = detectedDocument
+        _editableDocument = State(initialValue: detectedDocument)
+        _selectedEnhancementMode = State(initialValue: selectedEnhancementMode)
+        _previewImage = State(initialValue: enhancedPreview)
         self.initialDocument = detectedDocument
         _editableDocument = State(initialValue: detectedDocument)
         _previewImage = State(initialValue: correctedPreview)
@@ -45,6 +60,7 @@ struct ScanReviewView: View {
                 VStack(spacing: CostcoTheme.Spacing.md) {
                     instructionsCard
                     editorCard
+                    enhancementCard
                     previewCard
                 }
                 .padding(CostcoTheme.Spacing.md)
@@ -64,6 +80,7 @@ struct ScanReviewView: View {
                 .font(CostcoTheme.Typography.headline)
                 .foregroundColor(CostcoTheme.Colors.textPrimary)
 
+            Text("The corrected scan updates as you drag each handle, and you can switch enhancement presets to make thermal receipt text easier to read before OCR runs.")
             Text("The corrected scan updates as you drag each handle, so you can rescue skewed or off-angle captures before OCR runs.")
                 .font(CostcoTheme.Typography.subheadline)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
@@ -149,6 +166,47 @@ struct ScanReviewView: View {
         .costcoCard()
     }
 
+    private var enhancementCard: some View {
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
+            Text("Enhancement modes")
+                .font(CostcoTheme.Typography.title3)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+            Text("Pick the version that makes totals, line items, and thermal-print text easiest to read.")
+                .font(CostcoTheme.Typography.footnote)
+                .foregroundColor(CostcoTheme.Colors.textSecondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CostcoTheme.Spacing.sm) {
+                    ForEach(ScanEnhancementMode.allCases) { mode in
+                        enhancementButton(for: mode)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .costcoCard()
+    }
+
+    private var previewCard: some View {
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
+            HStack {
+                Text("Corrected preview")
+                    .font(CostcoTheme.Typography.title3)
+                    .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+                Spacer()
+
+                Text(selectedEnhancementMode.title)
+                    .font(CostcoTheme.Typography.caption.weight(.semibold))
+                    .foregroundColor(CostcoTheme.Colors.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(CostcoTheme.Colors.primary.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
     private var previewCard: some View {
         VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
             Text("Corrected preview")
@@ -165,6 +223,7 @@ struct ScanReviewView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: CostcoTheme.CornerRadius.md))
 
+            Text("This flattened and enhanced image is what gets passed into the OCR and receipt-processing pipeline.")
             Text("This flattened image is what gets passed into the OCR and receipt-processing pipeline.")
                 .font(CostcoTheme.Typography.footnote)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
@@ -199,6 +258,32 @@ struct ScanReviewView: View {
         .background(CostcoTheme.Colors.cardBackground)
     }
 
+    @ViewBuilder
+    private func enhancementButton(for mode: ScanEnhancementMode) -> some View {
+        let isSelected = selectedEnhancementMode == mode
+
+        Button {
+            selectedEnhancementMode = mode
+            refreshPreview()
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(mode.title)
+                    .font(CostcoTheme.Typography.subheadline.weight(.semibold))
+                Text(mode.subtitle)
+                    .font(CostcoTheme.Typography.caption)
+            }
+            .foregroundColor(isSelected ? .white : CostcoTheme.Colors.textPrimary)
+            .frame(width: 124, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: CostcoTheme.CornerRadius.md)
+                    .fill(isSelected ? CostcoTheme.Colors.primary : CostcoTheme.Colors.primary.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func handleColor(for corner: DocumentCorner) -> Color {
         switch corner {
         case .topLeft, .bottomRight:
@@ -215,6 +300,8 @@ struct ScanReviewView: View {
     }
 
     private func refreshPreview() {
+        let correctedImage = scannerService.correctPerspective(in: image, using: editableDocument) ?? image
+        previewImage = enhancementService.enhance(correctedImage, mode: selectedEnhancementMode) ?? correctedImage
         previewImage = scannerService.correctPerspective(in: image, using: editableDocument) ?? image
     }
 

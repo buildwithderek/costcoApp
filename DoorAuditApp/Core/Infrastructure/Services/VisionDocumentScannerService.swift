@@ -9,6 +9,7 @@
 import UIKit
 import Vision
 import CoreImage
+import ImageIO
 
 /// Detects receipt bounds with Vision and produces flattened scans with Core Image.
 final class VisionDocumentScannerService: DocumentDetectionService, PerspectiveCorrectionService {
@@ -21,6 +22,35 @@ final class VisionDocumentScannerService: DocumentDetectionService, PerspectiveC
             return nil
         }
 
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+        do {
+            let request = makeRectangleRequest()
+            try handler.perform([request])
+            return detectedDocument(from: request, logSuccess: true)
+
+        } catch {
+            Logger.shared.warning("Document detection failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func detectDocument(
+        in pixelBuffer: CVPixelBuffer,
+        orientation: CGImagePropertyOrientation = .right
+    ) -> DetectedDocument? {
+        let request = makeRectangleRequest()
+        let handler = VNImageRequestHandler(
+            cvPixelBuffer: pixelBuffer,
+            orientation: orientation,
+            options: [:]
+        )
+
+        do {
+            try handler.perform([request])
+            return detectedDocument(from: request, logSuccess: false)
+        } catch {
+            Logger.shared.debug("Live document detection failed: \(error.localizedDescription)")
         let request = VNDetectRectanglesRequest()
         request.minimumAspectRatio = 0.2
         request.maximumAspectRatio = 0.85
@@ -97,6 +127,41 @@ final class VisionDocumentScannerService: DocumentDetectionService, PerspectiveC
             scale: image.scale,
             orientation: .up
         )
+    }
+
+    private func makeRectangleRequest() -> VNDetectRectanglesRequest {
+        let request = VNDetectRectanglesRequest()
+        request.minimumAspectRatio = 0.2
+        request.maximumAspectRatio = 0.85
+        request.minimumSize = AppConstants.ImageProcessing.minDocumentSize
+        request.minimumConfidence = AppConstants.ImageProcessing.minDocumentConfidence
+        request.maximumObservations = 1
+        request.quadratureTolerance = 20
+        return request
+    }
+
+    private func detectedDocument(
+        from request: VNDetectRectanglesRequest,
+        logSuccess: Bool
+    ) -> DetectedDocument? {
+        guard let rectangle = request.results?.first else {
+            Logger.shared.debug("No receipt quadrilateral detected")
+            return nil
+        }
+
+        let detectedDocument = DetectedDocument(
+            topLeft: rectangle.topLeft,
+            topRight: rectangle.topRight,
+            bottomLeft: rectangle.bottomLeft,
+            bottomRight: rectangle.bottomRight,
+            confidence: rectangle.confidence
+        )
+
+        if logSuccess {
+            Logger.shared.info("Receipt quadrilateral detected with confidence \(String(format: "%.2f", rectangle.confidence))")
+        }
+
+        return detectedDocument
     }
 }
 
