@@ -68,18 +68,13 @@ struct AuditFormView: View {
         ZStack(alignment: .bottom) {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Receipt Preview Card
+                    auditSummaryCard
                     receiptCard
-                    
-                    // Issues Section (Primary)
                     issuesSection
-                    
-                    // Quick Staff Selection
                     staffSection
-                    
-                    // Audit Checks
                     checksSection
-                    
+                    notesSection
+
                     // Expandable Details
                     if showDetails {
                         detailsSection
@@ -92,14 +87,27 @@ struct AuditFormView: View {
                             showDetails.toggle()
                         }
                     } label: {
-                        HStack(spacing: 6) {
-                            Text(showDetails ? "Hide Details" : "Show More Details")
+                        HStack(spacing: 10) {
+                            Image(systemName: showDetails ? "doc.text.fill" : "doc.text")
+                                .foregroundColor(CostcoTheme.Colors.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(showDetails ? "Hide receipt details" : "Show receipt details")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(CostcoTheme.Colors.textPrimary)
+                                Text("View register, member, and barcode information")
+                                    .font(.caption)
+                                    .foregroundColor(CostcoTheme.Colors.textSecondary)
+                            }
+                            Spacer()
                             Image(systemName: showDetails ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(CostcoTheme.Colors.textSecondary)
                         }
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.vertical, 8)
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
                     }
+                    .buttonStyle(.plain)
                     
                     // Bottom spacing for action bar
                     Spacer(minLength: 100)
@@ -141,6 +149,41 @@ struct AuditFormView: View {
         }
     }
     
+    // MARK: - Audit Summary
+
+    private var auditSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Quick audit")
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            Text(staffName.isEmpty
+                 ? "Start by choosing the security staff member, then confirm checks and save the audit."
+                 : "Review issues, confirm checks, and complete the audit when everything looks right.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 8) {
+                statusChip(
+                    title: staffName.isEmpty ? "Staff needed" : "Staff set",
+                    systemImage: staffName.isEmpty ? "person.crop.circle.badge.exclamationmark" : "person.crop.circle.badge.checkmark",
+                    tint: staffName.isEmpty ? CostcoTheme.Colors.warning : CostcoTheme.Colors.success
+                )
+
+                statusChip(
+                    title: hasLoggedIssue ? "Issue logged" : "No issue logged",
+                    systemImage: hasLoggedIssue ? "exclamationmark.bubble.fill" : "checkmark.circle",
+                    tint: hasLoggedIssue ? CostcoTheme.Colors.secondary : CostcoTheme.Colors.success
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+    }
+
     // MARK: - Receipt Card
     
     private var receiptCard: some View {
@@ -404,14 +447,58 @@ struct AuditFormView: View {
         }
     }
     
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Notes")
+                .font(.headline)
+                .padding(.horizontal, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Add context only if someone reviewing later would need it.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                TextEditor(text: $notes)
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(10)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    private var hasLoggedIssue: Bool {
+        !itemOvercharge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !itemUndercharge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func statusChip(title: String, systemImage: String, tint: Color) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12))
+            .cornerRadius(999)
+    }
+
     // MARK: - Action Bar
     
     private var actionBar: some View {
         VStack(spacing: 0) {
             Divider()
-            
-            HStack(spacing: 16) {
-                // Complete button
+
+            VStack(alignment: .leading, spacing: 12) {
+                if staffName.isEmpty {
+                    Label("Select the security staff member to enable completion.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 Button {
                     Task { await saveAudit() }
                 } label: {

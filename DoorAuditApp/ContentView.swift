@@ -10,11 +10,9 @@
 //
 
 import SwiftUI
-import PhotosUI
 import AVFoundation
 
 struct ContentView: View {
-    @Environment(\.dependencies) private var dependencies
     @State private var viewModel: ReceiptCaptureViewModel
     
     // Camera/Image Picker State
@@ -109,12 +107,10 @@ struct ContentView: View {
     private func mainContent(viewModel: ReceiptCaptureViewModel) -> some View {
         ScrollView {
             VStack(spacing: CostcoTheme.Spacing.lg) {
-                // Header
                 headerSection
-                
-                // Stats Cards
+                workflowCard(viewModel: viewModel)
                 statsSection(viewModel: viewModel)
-                
+
                 // Capture Button
                 captureButtonSection
                     .padding(.horizontal, CostcoTheme.Spacing.md)
@@ -148,16 +144,44 @@ struct ContentView: View {
     }
     
     private var headerSection: some View {
-        VStack(spacing: CostcoTheme.Spacing.sm) {
-            Text(AppConstants.Store.fullName)
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.xs) {
+            Text("Door Audit")
                 .font(CostcoTheme.Typography.title2)
                 .foregroundColor(CostcoTheme.Colors.textPrimary)
-            
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Text(DateFormatterService.shared.string(from: Date(), type: .display))
                 .font(CostcoTheme.Typography.subheadline)
                 .foregroundColor(CostcoTheme.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, CostcoTheme.Spacing.md)
         .padding(.top, CostcoTheme.Spacing.md)
+    }
+
+    private func workflowCard(viewModel: ReceiptCaptureViewModel) -> some View {
+        VStack(alignment: .leading, spacing: CostcoTheme.Spacing.sm) {
+            Text(AppConstants.Store.fullName)
+                .font(CostcoTheme.Typography.headline)
+                .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+            Text(viewModel.todaysReceipts.isEmpty
+                 ? "Scan the next receipt to start today’s audit queue."
+                 : "\(viewModel.completedCount) of \(viewModel.todaysReceipts.count) receipts are marked audited today.")
+                .font(CostcoTheme.Typography.subheadline)
+                .foregroundColor(CostcoTheme.Colors.textSecondary)
+
+            HStack(spacing: CostcoTheme.Spacing.sm) {
+                Label("Scan first", systemImage: "camera.viewfinder")
+                Label("Review", systemImage: "doc.text.magnifyingglass")
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .font(CostcoTheme.Typography.caption)
+            .foregroundColor(CostcoTheme.Colors.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .costcoCard()
+        .padding(.horizontal, CostcoTheme.Spacing.md)
     }
     
     @ViewBuilder
@@ -289,25 +313,29 @@ struct ContentView: View {
     private func todaysReceiptsSection(viewModel: ReceiptCaptureViewModel) -> some View {
         VStack(alignment: .leading, spacing: CostcoTheme.Spacing.md) {
             // Header with View All link
-            HStack {
-                Text("Receipts Today")
-                    .font(CostcoTheme.Typography.title3)
-                    .foregroundColor(CostcoTheme.Colors.textPrimary)
-                
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Today’s queue")
+                        .font(CostcoTheme.Typography.title3)
+                        .foregroundColor(CostcoTheme.Colors.textPrimary)
+
+                    Text("\(viewModel.todaysReceipts.count) receipt\(viewModel.todaysReceipts.count == 1 ? "" : "s") ready for review")
+                        .font(CostcoTheme.Typography.subheadline)
+                        .foregroundColor(CostcoTheme.Colors.textSecondary)
+                }
+
                 Spacer()
-                
-                if !viewModel.todaysReceipts.isEmpty {
-                    NavigationLink {
-                        ReceiptsListView()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("View All")
-                                .font(CostcoTheme.Typography.subheadline)
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                        }
-                        .foregroundColor(CostcoTheme.Colors.primary)
+
+                NavigationLink {
+                    ReceiptsListView()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("View All")
+                            .font(CostcoTheme.Typography.subheadline)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
                     }
+                    .foregroundColor(CostcoTheme.Colors.primary)
                 }
             }
             .padding(.horizontal, CostcoTheme.Spacing.md)
@@ -322,20 +350,6 @@ struct ContentView: View {
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                // #region agent log
-                                let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-                                let logEntry = "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"ContentView.swift:303\",\"message\":\"Swipe delete button tapped\",\"data\":{\"receiptID\":\"\(receipt.id.uuidString)\",\"receiptNumber\":\(index + 1)},\"timestamp\":\(timestamp)}\n"
-                                let logPath = "/Users/derekpunaro/Desktop/DoorAuditApp/.cursor/debug.log"
-                                if let logData = logEntry.data(using: .utf8) {
-                                    if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                                        fileHandle.seekToEndOfFile()
-                                        fileHandle.write(logData)
-                                        fileHandle.closeFile()
-                                    } else {
-                                        try? logData.write(to: URL(fileURLWithPath: logPath), options: [])
-                                    }
-                                }
-                                // #endregion
                                 Task {
                                     await viewModel.deleteReceipt(receipt)
                                 }
@@ -355,21 +369,24 @@ struct ContentView: View {
     }
     
     private var emptyStateSection: some View {
-        VStack(spacing: CostcoTheme.Spacing.md) {
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 48))
-                .foregroundColor(CostcoTheme.Colors.textSecondary)
-            
-            Text("No receipts captured today")
-                .font(CostcoTheme.Typography.title3)
-                .foregroundColor(CostcoTheme.Colors.textPrimary)
-            
-            Text("Tap 'Scan Receipt' to get started")
-                .font(CostcoTheme.Typography.subheadline)
-                .foregroundColor(CostcoTheme.Colors.textSecondary)
+        ContentUnavailableView {
+            Label("No receipts captured today", systemImage: "camera.viewfinder")
+        } description: {
+            Text("Scan a receipt or import one from your photo library to start today’s audit queue.")
+        } actions: {
+            VStack(spacing: CostcoTheme.Spacing.sm) {
+                Button("Scan Receipt") {
+                    handleScanTap()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Choose From Library") {
+                    showImagePicker = true
+                }
+                .buttonStyle(.bordered)
+            }
         }
-        .padding(CostcoTheme.Spacing.xl)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, CostcoTheme.Spacing.md)
     }
 }
 
