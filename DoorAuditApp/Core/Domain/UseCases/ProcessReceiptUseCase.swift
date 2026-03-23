@@ -3,76 +3,14 @@
 //  DoorAuditApp
 //
 //  Use Case for processing a receipt image
-//  ENHANCED: Integrates ReceiptCropper for auto-crop to receipt bounds
-//  Orchestrates: Image processing → Auto-crop → OCR → Barcode → Parsing → Saving
+//  ENHANCED: Integrates document detection and perspective correction for flattened scans
+//  Orchestrates: Image processing → Detect → Flatten → OCR → Barcode → Parsing → Saving
 //  Created: December 2025
 //
 
 import Foundation
 import UIKit
 import AVFoundation
-import Vision
-
-// MARK: - Receipt Cropper
-
-/// Auto-crops images to detected receipt bounds using Vision framework
-enum ReceiptCropper {
-    
-    /// Crop image to detected receipt bounds
-    /// Returns nil if no receipt detected (use original image)
-    static func cropToReceipt(_ image: UIImage) -> UIImage? {
-        guard let cgImage = image.cgImage else { return nil }
-        
-        let request = VNDetectRectanglesRequest()
-        request.minimumAspectRatio = 0.2   // Receipts are tall and narrow
-        request.maximumAspectRatio = 0.8
-        request.minimumSize = 0.15          // At least 15% of image
-        request.minimumConfidence = 0.6
-        request.maximumObservations = 1
-        
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        
-        do {
-            try handler.perform([request])
-            
-            guard let observation = request.results?.first else {
-                Logger.shared.debug("No receipt rectangle detected")
-                return nil
-            }
-            
-            // Convert to image coordinates
-            let imageWidth = CGFloat(cgImage.width)
-            let imageHeight = CGFloat(cgImage.height)
-            
-            // Use bounding box for simple crop
-            let bbox = observation.boundingBox
-            let cropRect = CGRect(
-                x: bbox.minX * imageWidth,
-                y: (1 - bbox.maxY) * imageHeight,
-                width: bbox.width * imageWidth,
-                height: bbox.height * imageHeight
-            )
-            
-            // Add some padding
-            let padding: CGFloat = 10
-            let paddedRect = cropRect.insetBy(dx: -padding, dy: -padding)
-            
-            // Ensure rect is within bounds
-            let clampedRect = paddedRect.intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
-            
-            guard let croppedCGImage = cgImage.cropping(to: clampedRect) else {
-                return nil
-            }
-            
-            Logger.shared.info("Receipt cropped: \(Int(clampedRect.width))x\(Int(clampedRect.height))")
-            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
-            
-        } catch {
-            Logger.shared.warning("Receipt crop failed: \(error.localizedDescription)")
-            return nil
-        }
-    }
-}
 
 // MARK: - Process Receipt Use Case Protocol
 
@@ -89,6 +27,8 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
     
     private let ocrService: OCRService
     private let barcodeService: BarcodeService
+    private let documentDetectionService: DocumentDetectionService
+    private let perspectiveCorrectionService: PerspectiveCorrectionService
     private let receiptRepository: ReceiptRepository
     private let imageRepository: ImageRepository
     
@@ -97,11 +37,15 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
     init(
         ocrService: OCRService,
         barcodeService: BarcodeService,
+        documentDetectionService: DocumentDetectionService,
+        perspectiveCorrectionService: PerspectiveCorrectionService,
         receiptRepository: ReceiptRepository,
         imageRepository: ImageRepository
     ) {
         self.ocrService = ocrService
         self.barcodeService = barcodeService
+        self.documentDetectionService = documentDetectionService
+        self.perspectiveCorrectionService = perspectiveCorrectionService
         self.receiptRepository = receiptRepository
         self.imageRepository = imageRepository
     }
@@ -117,24 +61,35 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
             Logger.shared.info("Step 1: Fixing image orientation...")
             let orientationFixed = image.fixedOrientation()
             
-            // Step 2: Auto-crop to receipt bounds (NEW!)
-            Logger.shared.info("Step 2: Auto-cropping to receipt bounds...")
-            let croppedImage: UIImage
-            if let cropped = ReceiptCropper.cropToReceipt(orientationFixed) {
-                Logger.shared.success("Receipt auto-cropped successfully")
-                croppedImage = cropped
+            // Step 2: Detect receipt bounds and flatten perspective
+            Logger.shared.info("Step 2: Detecting receipt bounds...")
+            let correctedImage: UIImage
+            if let detectedDocument = documentDetectionService.detectDocument(in: orientationFixed) {
+                Logger.shared.success("Receipt bounds detected successfully")
+
+                Logger.shared.info("Step 3: Correcting receipt perspective...")
+                if let flattened = perspectiveCorrectionService.correctPerspective(
+                    in: orientationFixed,
+                    using: detectedDocument
+                ) {
+                    Logger.shared.success("Receipt perspective corrected successfully")
+                    correctedImage = flattened
+                } else {
+                    Logger.shared.warning("Perspective correction failed, falling back to original image")
+                    correctedImage = orientationFixed
+                }
             } else {
                 Logger.shared.info("No receipt detected, using full image")
-                croppedImage = orientationFixed
+                correctedImage = orientationFixed
             }
             
-            // Step 3: Downscale for processing
-            Logger.shared.info("Step 3: Downscaling image...")
-            let processedImage = croppedImage.downscaled(maxDimension: AppConstants.ImageProcessing.maxDimension)
+            // Step 4: Downscale for processing
+            Logger.shared.info("Step 4: Downscaling image...")
+            let processedImage = correctedImage.downscaled(maxDimension: AppConstants.ImageProcessing.maxDimension)
             Logger.shared.debug("Image processed: \(processedImage.size)")
             
-            // Step 4: Extract text with OCR
-            Logger.shared.info("Step 4: Extracting text with OCR...")
+            // Step 5: Extract text with OCR
+            Logger.shared.info("Step 5: Extracting text with OCR...")
             let rawText = try await ocrService.extractText(from: processedImage)
             
             guard !rawText.isEmpty else {
@@ -143,12 +98,12 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
             
             Logger.shared.info("Extracted \(rawText.count) characters of text")
             
-            // Step 5: Parse receipt data from text
-            Logger.shared.info("Step 5: Parsing receipt data...")
+            // Step 6: Parse receipt data from text
+            Logger.shared.info("Step 6: Parsing receipt data...")
             let parsedData = ocrService.parseReceiptData(from: rawText)
             
-            // Step 6: Detect barcode
-            Logger.shared.info("Step 6: Detecting barcode...")
+            // Step 7: Detect barcode
+            Logger.shared.info("Step 7: Detecting barcode...")
             let barcode = try? await barcodeService.detectBarcode(in: processedImage)
             
             if let barcode = barcode {
@@ -157,12 +112,12 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
                 Logger.shared.warning("No barcode detected")
             }
             
-            // Step 7: Save image
-            Logger.shared.info("Step 7: Saving image...")
+            // Step 8: Save image
+            Logger.shared.info("Step 8: Saving image...")
             let imageID = try await saveImage(processedImage)
             
-            // Step 8: Create receipt domain model
-            Logger.shared.info("Step 8: Creating receipt...")
+            // Step 9: Create receipt domain model
+            Logger.shared.info("Step 9: Creating receipt...")
             let receipt = Receipt(
                 timestamp: Date(),
                 barcodeValue: barcode,
@@ -179,8 +134,8 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
                 lineItems: parsedData.lineItems
             )
             
-            // Step 9: Validate receipt (soft validation - don't fail on missing fields)
-            Logger.shared.info("Step 9: Validating receipt...")
+            // Step 10: Validate receipt (soft validation - don't fail on missing fields)
+            Logger.shared.info("Step 10: Validating receipt...")
             do {
                 try receipt.validate()
             } catch {
@@ -188,8 +143,8 @@ final class DefaultProcessReceiptUseCase: ProcessReceiptUseCase {
                 Logger.shared.warning("Receipt validation warning: \(error.localizedDescription)")
             }
             
-            // Step 10: Save to repository
-            Logger.shared.info("Step 10: Saving receipt to database...")
+            // Step 11: Save to repository
+            Logger.shared.info("Step 11: Saving receipt to database...")
             try await receiptRepository.save(receipt)
             
             let duration = Date().timeIntervalSince(startTime)
@@ -288,6 +243,22 @@ protocol OCRService {
 protocol BarcodeService {
     /// Detect barcode in image
     func detectBarcode(in image: UIImage) async throws -> String?
+}
+
+// MARK: - Document Detection Service Protocol
+
+/// Protocol for document detection in receipt images
+protocol DocumentDetectionService {
+    /// Detect the most likely receipt/document quadrilateral in the image
+    func detectDocument(in image: UIImage) -> DetectedDocument?
+}
+
+// MARK: - Perspective Correction Service Protocol
+
+/// Protocol for scanner-style perspective correction
+protocol PerspectiveCorrectionService {
+    /// Warp the detected quadrilateral into a top-down flattened scan
+    func correctPerspective(in image: UIImage, using document: DetectedDocument) -> UIImage?
 }
 
 // MARK: - Camera Service Protocol
